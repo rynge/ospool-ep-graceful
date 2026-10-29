@@ -1,0 +1,67 @@
+diff --git a/etc/supervisord.d/0-htcondor.conf b/etc/supervisord.d/10-htcondor.conf
+index 5ec2340..47ee15f 100644
+--- a/etc/supervisord.d/10-htcondor.conf
++++ b/etc/supervisord.d/10-htcondor.conf
+@@ -1,7 +1,12 @@
+ [program:condor_master]
+ command=/usr/local/sbin/condor_master_wrapper
+-autorestart=unexpected
++autorestart=false
+ startsecs=60
+ stdout_logfile=/dev/stdout
+ stdout_logfile_maxbytes=0
+ redirect_stderr=true
++
++; wait for condor_off peaceful/graceful to finish
++stopsignal=TERM
++stopwaitsecs=86400
++stopasgroup=false
+diff --git a/etc/condor/config.d/50-main.config b/etc/condor/config.d/50-main.config
+index 80c82ef..cb8c921 100644
+--- a/etc/condor/config.d/50-main.config
++++ b/etc/condor/config.d/50-main.config
+@@ -35,6 +35,9 @@ SLOT_TYPE_1_PARTITIONABLE = TRUE
+ NUM_SLOTS = 1
+ NUM_SLOTS_TYPE_1 = 1
+ 
++# for graceful shutdown, give time for jobs to finish before exiting
++MaxJobRetirementTime = 86400
++
+ # make it look like a gwms glidein
+ GLIDEIN_Country = "US"
+ GLIDEIN_Site = "Docker"
+diff --git a/usr/local/sbin/condor_master_wrapper b/usr/local/sbin/condor_master_wrapper
+index e774354..f9c52d7 100755
+--- a/usr/local/sbin/condor_master_wrapper
++++ b/usr/local/sbin/condor_master_wrapper
+@@ -1,5 +1,29 @@
+ #!/bin/bash
+ 
++# Function to handle SIGTERM
++function exit_trap() {
++    if [ "X$SHUTDOWN_STRATEGY" = "Xpeaceful" ]; then
++        echo "Shutting down HTCondor peacefully - wait indefinitely for all jobs to finish"
++        /usr/sbin/condor_off -peaceful -startd
++    elif [ "X$SHUTDOWN_STRATEGY" = "Xgraceful" ]; then
++        echo "Shutting down HTCondor gracefully - wait for 24 hours for jobs to finish"
++        /usr/sbin/condor_off -graceful -startd
++    else
++        echo "Shutting down HTCondor fast - killing jobs"
++        /usr/sbin/condor_off -fast -master
++    fi
++}
+ 
+-exec /usr/sbin/condor_master -f
++trap exit_trap SIGTERM SIGINT
+ 
++/usr/sbin/condor_master -f &
++master_pid=$!
++
++# wait for condor_master forever, exiting is controlled by
++# condor_off in the trap above
++while kill -0 "$master_pid" 2>/dev/null; do
++    sleep 10
++done
++wait "$master_pid"
++
++exit 0
