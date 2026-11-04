@@ -1,4 +1,4 @@
-FROM hub.osg-htc.org/osg-htc/ospool-ep:25-release
+FROM hub.osg-htc.org/osg-htc/ospool-ep:26-development
 
 COPY graceful.patch /
 RUN  cd / && \
